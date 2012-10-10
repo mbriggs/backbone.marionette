@@ -8,7 +8,7 @@ Marionette.View = Backbone.View.extend({
     _.bindAll(this, "render");
     Marionette.addEventBinder(this);
 
-    Backbone.View.prototype.constructor.apply(this, arguments);
+    Backbone.View.protosourceType.constructor.apply(this, arguments);
 
     this.bindBackboneEntityTo(this.model, this.modelEvents);
     this.bindBackboneEntityTo(this.collection, this.collectionEvents);
@@ -17,7 +17,7 @@ Marionette.View = Backbone.View.extend({
   },
 
   // import the "triggerMethod" to trigger events with corresponding
-  // methods if the method exists 
+  // methods if the method exists
   triggerMethod: Marionette.triggerMethod,
 
   // Get the template for this view
@@ -89,7 +89,7 @@ Marionette.View = Backbone.View.extend({
     var triggers = this.configureTriggers();
     _.extend(combinedEvents, events, triggers);
 
-    Backbone.View.prototype.delegateEvents.call(this, combinedEvents);
+    Backbone.View.protosourceType.delegateEvents.call(this, combinedEvents);
   },
 
   // Internal method, handles the `show` event.
@@ -132,12 +132,67 @@ Marionette.View = Backbone.View.extend({
     });
   },
 
-  // This method is used to bind a backbone "entity" (collection/model) to methods on the view.
-  bindBackboneEntityTo: function(entity, bindings){
-    if (!entity || !bindings) { return; }
+  // A "data source" is what drives view rendering (for example, "model"
+  // or "controller"). This can be set if you wish to create your own base
+  // view sourceTypes that extend from Marionette.View
+  //
+  // defining a data source will:
+  //  - pull options.sourceName from initialize options, and set it on the view
+  //  - bind initial events you set in this._dataSources
+  //  - allow extensions to your base sourceType to define events hashes, which will
+  //    also get bound. (e.g. modelEvents, collectionEvents)
+  //  - create attach and detach methods (e.g. attachModel, detachModel), which
+  //    allows users to set or unset a model as the "data source" for the view
+  //
+  // Expecting source to look like
+  //
+  // { name: "name", initialEvents: {}, renderMethod: "methodName" }
+  //
+  // NOTE: name is the only required attribute.
+  // renderMethod is optional, by default it will be render<Name>
+  // initialEvents is optional, by default it will be empty {}
+  _dataSources: [],
+  defineDataSource: function(params){
+    this._dataSources.push( new Marionette.DataSource(params) );
+  },
+
+  // actually create the data sources. This should only be called once in the life
+  // cycle of the view
+  initializeDataSources: function(options){
+    var view = this;
+
+    _.each(this._dataSources, function(initialEvents, entityType){
+      // pull the entity we are binding to either from the options or the view
+      var entity = options[entityType] || view[entityType];
+
+      view.attachDataSource(entityType, entity);
+
+      var capitalized = entityType.charAt(0).toUpperCase() + entityType.slice(1);
+      view['attach'+ capitalized] = function(source){
+        view.attachDataSource(entityType, source);
+      }
+
+      view['detach'+ capitalized] = function(){
+        view.detachDataSource(entityType);
+      }
+    });
+  },
+
+  // attach a model instance to be this views "data source" for a type of event
+  attachDataSource: function(sourceType, entity){
+    // we want a combination of the events defined on the base type (dataSources[sourceType]),
+    // and events defined on the inherited sourceType (e.g. modelEvents)
+    var events = _.extend({}, this.dataSources[sourceType], this[sourceType +"Events"]);
 
     var view = this;
-    _.each(bindings, function(methodName, evt){
+    // set the entity on the model, (e.g. this.model)
+    this[sourceType] = entity;
+
+    // if there is an existing data source attached, it will be detached
+    view.detachDataSource(sourceType);
+
+    // bind each event
+    _.each(events, function(methodName, evt){
 
       var method = view[methodName];
       if(!method) {
@@ -146,5 +201,13 @@ Marionette.View = Backbone.View.extend({
 
       view.bindTo(entity, evt, method, view);
     });
+  },
+
+  // detach all events bound for a given source type (like 'model' or 'collection')
+  detachDataSource: function(type){
+    var entity = this[type];
+
+    this.unbindFor(entity);
+    if(this[type]) delete this[type];
   }
 });
